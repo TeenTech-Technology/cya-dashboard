@@ -51,7 +51,7 @@
     var r = await sb.auth.getUser();
     user = r.data && r.data.user;
     $("#pwReminder").hidden = !(user && user.user_metadata && user.user_metadata.must_change_password);
-    if (user) { show("vDash"); loadEvents(); } else show("vLogin");
+    if (user) { show("vDash"); loadEvents(); if (window.CYA_ADMIN) window.CYA_ADMIN.start(); } else show("vLogin");
   }
 
   $("#fLogin").addEventListener("submit", async function (e) {
@@ -84,6 +84,8 @@
   });
 
   /* ---------- Events list ---------- */
+  window.CYA = { sb: sb, toast: toast, esc: esc, icon: icon, friendly: friendly, fmtDate: fmtDate,
+    events: function () { return events; }, reloadEvents: function () { return loadEvents(); } };
   async function loadEvents() {
     var r = await sb.from("events").select("*")
       .order("date_tbc", { ascending: false }).order("event_date", { ascending: true, nullsFirst: true }).order("sort_order");
@@ -118,7 +120,7 @@
   function syncTbc() { f.event_date.disabled = f.date_tbc.checked; if (f.date_tbc.checked) f.event_date.value = ""; }
   f.date_tbc.addEventListener("change", syncTbc);
   $("#btnAdd").addEventListener("click", function () { openForm(null); });
-  document.querySelectorAll("[data-back]").forEach(function (b) { b.addEventListener("click", function () { show("vDash"); }); });
+  document.querySelectorAll("[data-back]").forEach(function (b) { b.addEventListener("click", function () { show("vDash"); if (window.CYA_ADMIN && b.closest("#vForm")) window.CYA_ADMIN.tab("events"); }); });
   $("#btnRmPoster").addEventListener("click", function () { removePoster = true; $("#posterPrev").hidden = true; });
 
   function openForm(ev) {
@@ -128,7 +130,7 @@
       f.title.value = ev.title || ""; f.event_date.value = ev.event_date || ""; f.date_tbc.checked = !!ev.date_tbc;
       f.venue.value = ev.venue || ""; f.description.value = ev.description || "";
       f.querySelector('[name=status][value="' + ev.status + '"]').checked = true;
-      f.register_url.value = ev.register_url || "";
+      f.register_url.value = ev.register_url || ""; f.capacity.value = ev.capacity || "";
     }
     var pp = $("#posterPrev"); pp.hidden = !(ev && ev.poster_url); if (!pp.hidden) $("img", pp).src = ev.poster_url;
     syncTbc(); show("vForm");
@@ -155,6 +157,9 @@
       description: f.description.value.trim() || null, status: f.querySelector("[name=status]:checked").value,
       register_url: reg || null
     };
+    var cap = f.capacity.value.trim();
+    if (cap && !(+cap >= 1)) return setErr(f, "Seat capacity should be a whole number, or left empty.");
+    if (cap || (editing && editing.capacity != null)) row.capacity = cap ? Math.round(+cap) : null;
     busy(f, true);
     try {
       if (file) row.poster_url = await uploadPoster(file);
@@ -162,7 +167,7 @@
       var r = editing ? await sb.from("events").update(row).eq("id", editing.id) : await sb.from("events").insert(row);
       if (r.error) throw r.error;
       toast(editing ? "Event updated." : "Event added.");
-      show("vDash"); loadEvents();
+      show("vDash"); loadEvents(); if (window.CYA_ADMIN) window.CYA_ADMIN.tab('events');
     } catch (err) { setErr(f, friendly(err)); }
     busy(f, false); syncTbc();
   });
@@ -170,11 +175,12 @@
   /* ---------- Delete ---------- */
   var dlg = $("#dlg"), pending = null;
   function askDelete(ev) {
-    pending = ev; $("#dlgText").textContent = "\u201C" + ev.title + "\u201D will be removed from the website. This can't be undone.";
+    pending = ev; $("#dlgTitle").textContent = "Delete this event?"; $("#dlgText").textContent = "\u201C" + ev.title + "\u201D will be removed from the website. This can't be undone.";
     dlg.showModal();
   }
-  $("#dlgNo").addEventListener("click", function () { dlg.close(); });
+  $("#dlgNo").addEventListener("click", function () { window.CYA_confirm = null; dlg.close(); });
   $("#dlgYes").addEventListener("click", async function () {
+    if (window.CYA_confirm) { var fn = window.CYA_confirm; window.CYA_confirm = null; dlg.close(); return fn(); }
     var r = await sb.from("events").delete().eq("id", pending.id);
     dlg.close();
     if (r.error) return toast(friendly(r.error));
