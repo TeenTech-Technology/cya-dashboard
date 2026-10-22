@@ -15,6 +15,8 @@
   function show(id) {
     views.forEach(function (v) { $("#" + v).hidden = v !== id; });
     $("#navact").hidden = !user;
+    document.body.classList.toggle("authed", !!user && id === "vDash");
+    if (window.CYA_NAV) CYA_NAV.close(true);
     window.scrollTo(0, 0);
   }
   function toast(msg) {
