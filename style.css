@@ -221,3 +221,12 @@ dialog { max-height: calc(100dvh - 32px); overflow-y: auto; overscroll-behavior:
 .btn.sm, .tbl .st, .navact .btn { min-height: 44px; }
 .navact .btn { min-width: 44px; }
 .link { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; }
+/* v5: logo + title on the left, menu on the right; drawer from the right */
+nav .w { display: flex; align-items: center; }
+nav .brand { order: 1; } .sectitle { order: 2; } .navact { order: 3; margin-left: auto; } .hamb { order: 4; margin-left: auto; }
+@media (max-width: 767px) {
+  .side { left: auto; right: 0; transform: translateX(105%); box-shadow: -8px 0 30px #0003; }
+  .side.open { transform: none; }
+  body.authed .sectitle { flex: 1; }
+  body.authed .hamb { margin-left: 0; }
+}
