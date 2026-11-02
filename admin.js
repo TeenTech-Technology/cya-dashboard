@@ -201,7 +201,153 @@
       " on " + evDate(e) + (e.venue ? " at " + e.venue : "") + ". Your ticket code is " + r.ticket_code + " (" + r.seats + " seat" + (r.seats > 1 ? "s" : "") + "). We look forward to seeing you!";
     return "https://wa.me/" + n + "?text=" + encodeURIComponent(msg);
   }
+  /* Public tickets encode only the ticket code (cya-website events.js: qrSvg(ticket.code)). */
+  function parseCode(raw) {
+    var s = String(raw || "").toUpperCase();
+    var m = s.match(/CYA-[ABCDEFGHJKLMNPQRSTUVWXYZ2-9]{6}/);
+    if (m) return m[0];
+    m = s.match(/CYA-[A-Z0-9]{4,12}/);
+    return m ? m[0] : "";
+  }
+  function findTicket(code) {
+    code = String(code || "").toUpperCase();
+    return (cache.reservations || []).find(function (r) { return String(r.ticket_code || "").toUpperCase() === code; });
+  }
+  var qrDetector = null;
+  try { if (window.BarcodeDetector) qrDetector = new BarcodeDetector({ formats: ["qr_code"] }); } catch (e) { qrDetector = null; }
+  var scanOn = false, scanStream = null, scanTimer = null, scanBusy = false, scanCanvas = null, scanCode = "", scanRaw = "";
+  function scanNote(msg) {
+    var el = $("[data-scan-msg]"); if (!el) return;
+    el.textContent = msg || ""; el.hidden = !msg;
+  }
+  function decodeImageData(data, w, h) {
+    if (typeof jsQR !== "function") return "";
+    try { var code = jsQR(data, w, h, { inversionAttempts: "attemptBoth" }); return (code && code.data) || ""; }
+    catch (e) { return ""; }
+  }
+  function frameJsQR(video) {
+    var w = video.videoWidth, h = video.videoHeight; if (!w || !h) return "";
+    if (!scanCanvas) scanCanvas = document.createElement("canvas");
+    var scale = Math.min(1, 480 / Math.max(w, h));
+    var cw = Math.max(1, Math.floor(w * scale)), ch = Math.max(1, Math.floor(h * scale));
+    scanCanvas.width = cw; scanCanvas.height = ch;
+    var ctx = scanCanvas.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(video, 0, 0, cw, ch);
+    var img = ctx.getImageData(0, 0, cw, ch);
+    return decodeImageData(img.data, cw, ch);
+  }
+  function frameText(video) {
+    if (qrDetector) return qrDetector.detect(video).then(function (codes) {
+      if (codes && codes[0] && codes[0].rawValue) return codes[0].rawValue;
+      return frameJsQR(video);
+    }, function () { return frameJsQR(video); });
+    return Promise.resolve(frameJsQR(video));
+  }
+  function scanTick() {
+    if (!scanOn || scanBusy) return;
+    var video = $("[data-scan-video]");
+    if (!video) return;
+    scanBusy = true;
+    frameText(video).then(function (text) { if (text) onScan(text, false); }).catch(function () {}).then(function () {
+      scanBusy = false; if (scanOn) scanTimer = setTimeout(scanTick, 250);
+    });
+  }
+  function stopScan() {
+    scanOn = false; scanBusy = false;
+    if (scanTimer) { clearTimeout(scanTimer); scanTimer = null; }
+    if (scanStream) { scanStream.getTracks().forEach(function (t) { try { t.stop(); } catch (e) {} }); scanStream = null; }
+    var video = $("[data-scan-video]"); if (video) { try { video.pause(); } catch (e) {} video.srcObject = null; }
+    var live = $("[data-scan-live]"); if (live) live.hidden = true;
+    var start = $("[data-scan-start]"); if (start) start.hidden = false;
+    var stop = $("[data-scan-stop]"); if (stop) stop.hidden = true;
+  }
+  async function openCamera() {
+    var md = navigator.mediaDevices;
+    if (!md || !md.getUserMedia) { var err = new Error("no camera"); err.name = "NotFoundError"; throw err; }
+    try { return await md.getUserMedia({ audio: false, video: { facingMode: { ideal: "environment" } } }); }
+    catch (e) {
+      if (e && (e.name === "NotAllowedError" || e.name === "PermissionDeniedError" || e.name === "SecurityError")) throw e;
+      return md.getUserMedia({ audio: false, video: true });
+    }
+  }
+  async function startScan() {
+    if (scanOn) return;
+    scanNote("");
+    if (!window.isSecureContext) { scanNote("The camera needs a secure page (https). Type the ticket code below."); return; }
+    var stream;
+    try { stream = await openCamera(); }
+    catch (e) {
+      var name = e && e.name;
+      if (name === "NotAllowedError" || name === "PermissionDeniedError" || name === "SecurityError") scanNote("Camera permission was blocked. Allow the camera for this site in the browser settings, or type the ticket code below.");
+      else if (name === "NotFoundError" || name === "DevicesNotFoundError" || name === "OverconstrainedError") scanNote("No camera was found on this device. Type the ticket code below, or choose a photo of the ticket.");
+      else scanNote("The camera could not be started. Type the ticket code below, or choose a photo of the ticket.");
+      return;
+    }
+    var video = $("[data-scan-video]"); if (!video) { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
+    scanStream = stream; video.srcObject = stream; video.muted = true; video.setAttribute("playsinline", "");
+    var playP = video.play(); if (playP && playP.catch) playP.catch(function () {});
+    scanOn = true;
+    var live = $("[data-scan-live]"); if (live) live.hidden = false;
+    var start = $("[data-scan-start]"); if (start) start.hidden = true;
+    var stop = $("[data-scan-stop]"); if (stop) stop.hidden = false;
+    scanNote("Point the camera at the ticket QR code. Scanning stays on for the next ticket.");
+    scanTick();
+  }
+  function scanFile(file) {
+    if (!file) return;
+    var img = new Image(), url = URL.createObjectURL(file);
+    img.onload = function () {
+      var c = document.createElement("canvas"); c.width = img.naturalWidth; c.height = img.naturalHeight;
+      var ctx = c.getContext("2d", { willReadFrequently: true }); ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+      var max = 800, scale = Math.min(1, max / Math.max(c.width, c.height));
+      if (scale < 1) {
+        var c2 = document.createElement("canvas"); c2.width = Math.max(1, Math.floor(c.width * scale)); c2.height = Math.max(1, Math.floor(c.height * scale));
+        c2.getContext("2d", { willReadFrequently: true }).drawImage(c, 0, 0, c2.width, c2.height); c = c2;
+      }
+      var imgData = c.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, c.width, c.height);
+      var text = decodeImageData(imgData.data, c.width, c.height);
+      if (text) onScan(text, true); else scanNote("No QR code found in that photo. Try again, or type the code below.");
+    };
+    img.onerror = function () { URL.revokeObjectURL(url); scanNote("That photo could not be opened. Type the ticket code below."); };
+    img.src = url;
+  }
+  function onScan(raw, force) {
+    var code = parseCode(raw);
+    if (!code) {
+      if (force || raw !== scanRaw) { scanRaw = String(raw || ""); scanNote("That QR is not a CYA ticket code. The code looks like CYA-7KX2PQ. You can type it below."); }
+      return;
+    }
+    if (!force && code === scanCode) return;
+    scanCode = code; scanRaw = String(raw || "");
+    showScanResult(code);
+  }
+  function selectedEvent() {
+    var sel = $("[data-evf]"); if (!sel || !sel.value) return null;
+    var id = sel.value, ev = (C.events() || []).filter(function (e) { return e.id === id; })[0];
+    return ev || { id: id, title: sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : "the selected event" };
+  }
+  function showScanResult(code) {
+    var box = $("[data-scan-result]"); if (!box) return;
+    var x = findTicket(code);
+    if (!x) {
+      box.innerHTML = '<div class="scanres bad"><p class="scanflag">No ticket found</p><p>Nothing matches <b class="code">' + esc(code) + "</b>. Check the code, or type it in the box below.</p></div>";
+      return;
+    }
+    var chosen = selectedEvent(), other = chosen && x.event_id !== chosen.id;
+    var bits = [];
+    if (other) bits.push("This ticket is for " + (x.events && x.events.title ? x.events.title : "another event") + ", not " + (chosen.title || "the event you selected") + ".");
+    if (x.checked_in) bits.push("Already checked in" + (x.checked_in_at ? " (" + dt(x.checked_in_at) + ")." : "."));
+    var kind = !bits.length ? "ok" : "warn";
+    var flag = !bits.length ? "Ready to check in" : bits.join(" ");
+    var btn = x.checked_in
+      ? '<button class="btn bl sm" type="button" data-checkin="' + x.id + '">' + icon("check") + "<span>Undo check-in</span></button>"
+      : '<button class="btn bb scan-go" type="button" data-checkin="' + x.id + '">' + icon("check") + "<span>Check in</span></button>";
+    box.innerHTML = '<div class="scanres ' + kind + '"><p class="scanflag">' + esc(flag) + '</p><p class="code">' + esc(x.ticket_code) + "</p><h3>" + esc(x.full_name) + "</h3><p>" +
+      esc(x.events && x.events.title) + " · " + x.seats + " seat" + (x.seats > 1 ? "s" : "") + "</p>" + minorCell(x) + btn + "</div>";
+  }
   async function loadReservations() {
+    stopScan(); scanCode = ""; scanRaw = "";
     var el = $("#p-reservations");
     var r = await sb.from("reservations").select("*,events(id,title,event_date,date_tbc,venue,capacity)").order("created_at", { ascending: false });
     if (r.error) { if (missing(r.error)) return notReady(el); return toast(C.friendly(r.error)); }
@@ -209,8 +355,14 @@
     var evs = C.events();
     var opts = '<select data-evf aria-label="Filter by event"><option value="">All events</option>' + evs.map(function (e) { return '<option value="' + e.id + '">' + esc(e.title) + "</option>"; }).join("") + "</select>";
     el.innerHTML = head("Reservations", "Seats booked through the website. Look up a ticket code at the door and mark people as checked in.") +
-      '<form class="lookup" data-lookup><label class="srch">' + icon("ticket") + '<input name="code" placeholder="Ticket code, e.g. CYA-7KX2PQ" aria-label="Ticket code" autocapitalize="characters"></label><button class="btn bb sm" type="submit">Find ticket</button></form><div data-found></div>' +
-      '<div class="cards" data-totals></div>' + toolbar("reservations", { ph: "Search name, phone, parent phone, code", extra: opts }) + '<div data-list="reservations"></div>';
+      toolbar("reservations", { ph: "Search name, phone, parent phone, code", extra: opts }) +
+      '<div class="scanbox"><div class="scanbar"><button class="btn bb sm" type="button" data-scan-start>' + icon("cam") + '<span>Scan ticket</span></button>' +
+      '<button class="btn bl sm" type="button" data-scan-stop hidden>' + icon("x") + "<span>Stop</span></button>" +
+      '<label class="btn bl sm filebtn"><span>Choose a photo</span><input type="file" accept="image/*" data-scan-file></label></div>' +
+      '<p class="muted scanhelp">Point the camera at the QR code on the ticket. It contains the ticket code, for example CYA-7KX2PQ. Pick one event in the filter if you want a warning when a ticket is for a different event.</p>' +
+      '<p class="scanmsg" data-scan-msg hidden role="status"></p><div class="scanlive" data-scan-live hidden><video data-scan-video playsinline muted autoplay></video></div><div data-scan-result></div></div>' +
+      '<form class="lookup" data-lookup><label class="srch">' + icon("ticket") + '<input name="code" placeholder="Or type the code, e.g. CYA-7KX2PQ" aria-label="Ticket code" autocapitalize="characters"></label><button class="btn bb sm" type="submit">Find ticket</button></form><div data-found></div>' +
+      '<div class="cards" data-totals></div><div data-list="reservations"></div>';
     exporters.reservations = { name: "cya-reservations", rows: function () { return resFiltered().map(function (x) { return { "Ticket code": x.ticket_code, Event: x.events ? x.events.title : "",
       "Event date": evDate(x.events), Name: x.full_name, Phone: x.phone, Email: x.email || "",
       "Under 18": yn(x.under_18), "Parent permission": yn(x.parent_permission), "Parent phone": x.parent_phone || "",
@@ -263,11 +415,12 @@
     if (r.error) return toast(C.friendly(r.error));
     x.checked_in = on; x.checked_in_at = on ? new Date().toISOString() : null;
     toast(on ? x.full_name + " is checked in." : "Check-in undone."); drawReservations(); lookupShow();
+    if (scanCode && String(x.ticket_code || "").toUpperCase() === scanCode) showScanResult(scanCode);
   }
   var lastCode = "";
   function lookupShow() {
     var box = $("[data-found]"); if (!box || !lastCode) return;
-    var x = cache.reservations.find(function (r) { return r.ticket_code.toUpperCase() === lastCode; });
+    var x = findTicket(lastCode);
     box.innerHTML = x ? '<div class="found">' + resList([x]) + "</div>" :
       '<div class="empty">No ticket found with code ' + esc(lastCode) + ". Please check the code and try again.</div>";
   }
@@ -364,6 +517,7 @@
   var loaders = { overview: loadOverview, reservations: loadReservations, volunteers: function () { return loadPeople("volunteers"); }, partners: function () { return loadPeople("partners"); },
     gallery: loadGallery, subscribers: loadSubscribers, feedback: loadFeedback, stats: loadStats, events: function () { return C.reloadEvents(); } };
   function tab(name) {
+    if (name !== "reservations") stopScan();
     current = name;
     document.querySelectorAll("#tabs [data-tab]").forEach(function (b) { var on = b.dataset.tab === name; b.classList.toggle("on", on); if (on) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current"); b.removeAttribute("aria-selected"); var t = $("#secTitle"); if (on && t) t.textContent = b.textContent.trim(); });
     if (window.CYA_NAV) CYA_NAV.close();
@@ -375,6 +529,8 @@
     $("#tabs").addEventListener("click", function (e) { var b = e.target.closest("[data-tab]"); if (b) { tab(b.dataset.tab); var c = document.querySelector(".content"); if (c) window.scrollTo(0, 0); } });
     var dash = $("#vDash");
     dash.addEventListener("click", function (e) {
+      if (e.target.closest("[data-scan-start]")) return startScan();
+      if (e.target.closest("[data-scan-stop]")) return stopScan();
       var b = e.target.closest("[data-go]"); if (b) return tab(b.dataset.go);
       b = e.target.closest("[data-checkin]"); if (b) return checkIn(b.dataset.checkin);
       b = e.target.closest("[data-rm]");
@@ -396,7 +552,8 @@
     dash.addEventListener("change", async function (e) {
       var t = e.target;
       if (t.dataset.filter) return drawPeople(t.dataset.filter);
-      if (t.hasAttribute("data-evf")) return drawReservations();
+      if (t.hasAttribute("data-scan-file")) { if (t.files && t.files[0]) scanFile(t.files[0]); t.value = ""; return; }
+      if (t.hasAttribute("data-evf")) { drawReservations(); if (scanCode) showScanResult(scanCode); return; }
       if (t.dataset.status) {
         var r = await sb.from(t.dataset.table).update({ status: t.value }).eq("id", t.dataset.status);
         if (r.error) return toast(C.friendly(r.error));
