@@ -65,12 +65,22 @@
   });
 
   /* ---------- Table that becomes cards on phones ---------- */
-  function table(cols, rows, rowFn) {
+  var phoneM = window.matchMedia("(max-width: 767px)");
+  function table(cols, rows, rowFn, opt) {
     if (!rows.length) return '<div class="empty">Nothing here yet.</div>';
-    return '<div class="tw"><table class="tbl"><thead><tr>' + cols.map(function (c) { return "<th>" + c + "</th>"; }).join("") + "</tr></thead><tbody>" +
+    opt = opt || {};
+    var colsHtml = (opt.widths ? "<colgroup>" + opt.widths.map(function (w) { return '<col style="width:' + w + '">'; }).join("") + "</colgroup>" : "");
+    return '<div class="tw' + (opt.fit ? " fit" : "") + '"><table class="tbl">' + colsHtml + "<thead><tr>" + cols.map(function (c) { return "<th>" + c + "</th>"; }).join("") + "</tr></thead><tbody>" +
       rows.map(function (r) { var cells = rowFn(r); return "<tr>" + cells.map(function (v, i) {
         return '<td data-label="' + cols[i] + '">' + (v == null || v === "" ? '<span class="muted">-</span>' : v) + "</td>"; }).join("") + "</tr>"; }).join("") +
       "</tbody></table></div>";
+  }
+  function field(label, value) {
+    return "<div><dt>" + label + "</dt><dd>" + (value == null || value === "" ? '<span class="muted">-</span>' : value) + "</dd></div>";
+  }
+  function cards(rows, render) {
+    if (!rows.length) return '<div class="empty">Nothing here yet.</div>';
+    return '<div class="acards">' + rows.map(render).join("") + "</div>";
   }
   function toolbar(key, opts) {
     return '<div class="tools"><label class="srch">' + icon("search") + '<input type="search" data-search="' + key + '" placeholder="' + (opts.ph || "Search") + '" aria-label="Search"></label>' +
@@ -90,10 +100,15 @@
   /* ---------- Volunteers & Partners (same pattern) ---------- */
   var people = {
     volunteers: { title: "Volunteers", sub: "People who offered to help through the website.", ph: "Search name, phone, parent phone, area, skills",
-      cols: ["Received", "Name", "Contact", "Area", "Age", "Parent permission", "Parent phone", "Skills and interests", "Availability", "Message", "Status", ""],
+      cols: ["Received", "Volunteer", "Area", "Age", "Parent", "Skills and interests", "Status", ""],
+      widths: ["9%", "16%", "10%", "8%", "14%", "16%", "18%", "9%"],
       fields: ["full_name", "phone", "email", "parent_phone", "area", "skills", "availability", "message"],
-      row: function (r) { return [d(r.created_at), "<b>" + esc(r.full_name) + "</b>", esc(r.phone) + (r.email ? '<br><a href="mailto:' + esc(r.email) + '">' + esc(r.email) + "</a>" : ""),
-        esc(r.area), esc(r.age_range), yn(r.parent_permission), esc(r.parent_phone), esc(r.skills), esc(r.availability), esc(r.message), statusSel(r.id, r.status, "volunteers"), delBtn("volunteers", r.id, r.full_name)]; },
+      row: function (r) { return [d(r.created_at),
+        '<div class="sub"><b>' + esc(r.full_name) + "</b><small>" + esc(r.phone) + "</small>" + (r.email ? '<small><a href="mailto:' + esc(r.email) + '">' + esc(r.email) + "</a></small>" : "") + "</div>",
+        esc(r.area), esc(r.age_range),
+        '<div class="sub">' + (r.parent_permission ? '<span class="pill ok">Yes</span>' : '<span class="pill grey">No</span>') + "<small>" + (r.parent_phone ? esc(r.parent_phone) : '<span class="muted">-</span>') + "</small></div>",
+        '<div class="sub"><span>' + esc(r.skills) + "</span><small>Availability: " + esc(r.availability) + "</small>" + (r.message ? "<small>" + esc(r.message) + "</small>" : "") + "</div>",
+        statusSel(r.id, r.status, "volunteers"), delBtn("volunteers", r.id, r.full_name)]; },
       exp: function (r) { return { Received: dt(r.created_at), Name: r.full_name, Phone: r.phone, Email: r.email || "", Area: r.area, "Age range": r.age_range || "",
         "Parent permission": yn(r.parent_permission), "Parent phone": r.parent_phone || "",
         "Skills and interests": r.skills, Availability: r.availability, Message: r.message || "", Status: r.status }; } },
@@ -121,10 +136,17 @@
     var fields = people[key] ? people[key].fields : (lists[key] && lists[key].fields) || [];
     return (cache[key] || []).filter(function (r) { return (!st || r.status === st) && match(r, q, fields); });
   }
+  function volCard(r) {
+    return '<article class="acard"><div class="acard-top"><b>' + esc(r.full_name) + '</b><small class="muted">' + d(r.created_at) + "</small></div><dl>" +
+      field("Phone", esc(r.phone)) + field("Email", r.email ? '<a href="mailto:' + esc(r.email) + '">' + esc(r.email) + "</a>" : "") +
+      field("Area", esc(r.area)) + field("Age", esc(r.age_range)) + field("Parent permission", yn(r.parent_permission)) + field("Parent phone", esc(r.parent_phone)) +
+      field("Skills and interests", esc(r.skills)) + field("Availability", esc(r.availability)) + field("Message", esc(r.message)) +
+      field("Status", statusSel(r.id, r.status, "volunteers")) + "</dl><div class=\"acts\">" + delBtn("volunteers", r.id, r.full_name) + "</div></article>";
+  }
   function drawPeople(key) {
     var cfg = people[key], rows = filtered(key);
     $('[data-count="' + key + '"]').innerHTML = countsLine(cache[key]);
-    $('[data-list="' + key + '"]').innerHTML = table(cfg.cols, rows, cfg.row);
+    $('[data-list="' + key + '"]').innerHTML = key === "volunteers" && phoneM.matches ? cards(rows, volCard) : table(cfg.cols, rows, cfg.row, cfg.widths ? { fit: true, widths: cfg.widths } : null);
   }
 
   /* ---------- Subscribers & Feedback ---------- */
@@ -199,21 +221,41 @@
     var el = $("#p-reservations"), q = $("[data-search]", el).value, ev = $("[data-evf]", el).value;
     return cache.reservations.filter(function (x) { return (!ev || x.event_id === ev) && match(x, q, ["full_name", "phone", "email", "ticket_code", "parent_phone"]); });
   }
-  var RES_COLS = ["Code", "Event", "Name", "Contact", "Under 18", "Parent permission", "Parent phone", "Seats", "Check-in", ""];
-  function resRow(x) {
+  var RES_COLS = ["Code", "Event", "Attendee", "Minor", "Seats", "Check-in", ""];
+  var RES_W = ["12%", "15%", "20%", "18%", "7%", "13%", "15%"];
+  function resActs(x) {
     var wa = waLink(x);
-    return ['<b class="code">' + esc(x.ticket_code) + "</b>", esc(x.events && x.events.title), "<b>" + esc(x.full_name) + "</b>", esc(x.phone) + (x.email ? "<br>" + esc(x.email) : ""),
-      yn(x.under_18), yn(x.parent_permission), esc(x.parent_phone), x.seats,
-      x.checked_in ? '<span class="pill ok">' + icon("check") + "Checked in</span>" + (x.checked_in_at ? '<br><small class="muted">' + dt(x.checked_in_at) + "</small>" : "") : '<span class="pill grey">Not yet</span>',
-      '<div class="acts">' + '<button class="btn sm ' + (x.checked_in ? "bl" : "bb") + '" type="button" data-checkin="' + x.id + '">' + icon("check") + "<span>" + (x.checked_in ? "Undo" : "Check in") + "</span></button>" +
-      (wa ? '<a class="btn bl sm" href="' + esc(wa) + '" target="_blank" rel="noopener">' + icon("chat") + "<span>WhatsApp reminder</span></a>" : "") + delBtn("reservations", x.id, x.ticket_code) + "</div>"];
+    return '<div class="acts"><button class="btn sm ' + (x.checked_in ? "bl" : "bb") + '" type="button" data-checkin="' + x.id + '">' + icon("check") + "<span>" + (x.checked_in ? "Undo" : "Check in") + "</span></button>" +
+      (wa ? '<a class="btn bl sm" href="' + esc(wa) + '" target="_blank" rel="noopener">' + icon("chat") + "<span>WhatsApp reminder</span></a>" : "") + delBtn("reservations", x.id, x.ticket_code) + "</div>";
+  }
+  function resStatus(x) {
+    return x.checked_in ? '<span class="pill ok">' + icon("check") + "Checked in</span>" + (x.checked_in_at ? '<br><small class="muted">' + dt(x.checked_in_at) + "</small>" : "") : '<span class="pill grey">Not yet</span>';
+  }
+  function minorCell(x) {
+    return '<div class="sub">' + (x.under_18 ? '<span class="pill">Minor</span>' : '<span class="pill grey">No</span>') +
+      "<small>Permission: " + yn(x.parent_permission) + "</small><small>" + (x.parent_phone ? esc(x.parent_phone) : '<span class="muted">-</span>') + "</small></div>";
+  }
+  function resRow(x) {
+    return ['<b class="code">' + esc(x.ticket_code) + "</b>", esc(x.events && x.events.title),
+      '<div class="sub"><b>' + esc(x.full_name) + "</b><small>" + esc(x.phone) + "</small>" + (x.email ? "<small>" + esc(x.email) + "</small>" : "") + "</div>",
+      minorCell(x), x.seats, resStatus(x), resActs(x)];
+  }
+  function resCard(x) {
+    return '<article class="acard"><div class="acard-top"><b class="code">' + esc(x.ticket_code) + "</b>" + resStatus(x) + "</div><h3>" + esc(x.full_name) + "</h3><dl>" +
+      field("Event", esc(x.events && x.events.title)) + field("Phone", esc(x.phone)) +
+      field("Email", x.email ? '<a href="mailto:' + esc(x.email) + '">' + esc(x.email) + "</a>" : "") +
+      field("Seats", String(x.seats)) + field("Under 18", yn(x.under_18)) + field("Parent permission", yn(x.parent_permission)) +
+      field("Parent phone", esc(x.parent_phone)) + "</dl>" + resActs(x) + "</article>";
+  }
+  function resList(rows) {
+    return phoneM.matches ? cards(rows, resCard) : table(RES_COLS, rows, resRow, { fit: true, widths: RES_W });
   }
   function drawReservations() {
     var rows = resFiltered(), ev = $("[data-evf]").value, tot = {};
     cache.reservations.forEach(function (x) { if (ev && x.event_id !== ev) return; var k = x.event_id; tot[k] = tot[k] || { e: x.events, seats: 0, n: 0, inn: 0 }; tot[k].seats += x.seats; tot[k].n++; if (x.checked_in) tot[k].inn += x.seats; });
     $("[data-totals]").innerHTML = Object.keys(tot).map(function (k) { var t = tot[k], c = t.e && t.e.capacity;
       return '<div class="stat"><span class="lbl">' + esc(t.e && t.e.title) + "</span><b>" + t.seats + (c ? " / " + c : "") + '</b><span>seats booked in ' + t.n + " booking" + (t.n === 1 ? "" : "s") + (c ? ", " + Math.max(c - t.seats, 0) + " left" : "") + ", " + t.inn + " checked in</span></div>"; }).join("");
-    $('[data-list="reservations"]').innerHTML = table(RES_COLS, rows, resRow);
+    $('[data-list="reservations"]').innerHTML = resList(rows);
   }
   async function checkIn(id) {
     var x = cache.reservations.find(function (r) { return r.id === id; }); if (!x) return;
@@ -226,7 +268,7 @@
   function lookupShow() {
     var box = $("[data-found]"); if (!box || !lastCode) return;
     var x = cache.reservations.find(function (r) { return r.ticket_code.toUpperCase() === lastCode; });
-    box.innerHTML = x ? '<div class="found">' + table(RES_COLS, [x], resRow) + "</div>" :
+    box.innerHTML = x ? '<div class="found">' + resList([x]) + "</div>" :
       '<div class="empty">No ticket found with code ' + esc(lastCode) + ". Please check the code and try again.</div>";
   }
 
@@ -371,6 +413,12 @@
       if (e.target.matches("[data-gup]")) { e.preventDefault(); uploadGallery(e.target); }
       if (e.target.matches("[data-lookup]")) { e.preventDefault(); lastCode = e.target.code.value.trim().toUpperCase(); if (lastCode && !/^CYA-/.test(lastCode)) lastCode = "CYA-" + lastCode; lookupShow(); }
     });
+    var onPhone = function () {
+      if (current === "reservations" && cache.reservations) { drawReservations(); lookupShow(); }
+      if (current === "volunteers" && cache.volunteers) drawPeople("volunteers");
+    };
+    if (phoneM.addEventListener) phoneM.addEventListener("change", onPhone);
+    else if (phoneM.addListener) phoneM.addListener(onPhone);
   }
 
   window.CYA_ADMIN = {
