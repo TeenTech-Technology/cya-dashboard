@@ -11,6 +11,7 @@
   function d(ts) { return ts ? new Date(ts).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : ""; }
   function dt(ts) { return ts ? new Date(ts).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""; }
   function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ""; }
+  function yn(v) { return v ? "Yes" : "No"; }
   function evDate(e) { return e ? C.fmtDate(e) : ""; }
   function missing(err) { return err && /does not exist|schema cache|not find|PGRST20|42P01|PGRST202/i.test((err.message || "") + (err.code || "")); }
   function notReady(el) {
@@ -88,12 +89,13 @@
 
   /* ---------- Volunteers & Partners (same pattern) ---------- */
   var people = {
-    volunteers: { title: "Volunteers", sub: "People who offered to help through the website.", ph: "Search name, phone, area, skills",
-      cols: ["Received", "Name", "Contact", "Area", "Age", "Skills and interests", "Availability", "Message", "Status", ""],
-      fields: ["full_name", "phone", "email", "area", "skills", "availability", "message"],
+    volunteers: { title: "Volunteers", sub: "People who offered to help through the website.", ph: "Search name, phone, parent phone, area, skills",
+      cols: ["Received", "Name", "Contact", "Area", "Age", "Parent permission", "Parent phone", "Skills and interests", "Availability", "Message", "Status", ""],
+      fields: ["full_name", "phone", "email", "parent_phone", "area", "skills", "availability", "message"],
       row: function (r) { return [d(r.created_at), "<b>" + esc(r.full_name) + "</b>", esc(r.phone) + (r.email ? '<br><a href="mailto:' + esc(r.email) + '">' + esc(r.email) + "</a>" : ""),
-        esc(r.area), esc(r.age_range), esc(r.skills), esc(r.availability), esc(r.message), statusSel(r.id, r.status, "volunteers"), delBtn("volunteers", r.id, r.full_name)]; },
+        esc(r.area), esc(r.age_range), yn(r.parent_permission), esc(r.parent_phone), esc(r.skills), esc(r.availability), esc(r.message), statusSel(r.id, r.status, "volunteers"), delBtn("volunteers", r.id, r.full_name)]; },
       exp: function (r) { return { Received: dt(r.created_at), Name: r.full_name, Phone: r.phone, Email: r.email || "", Area: r.area, "Age range": r.age_range || "",
+        "Parent permission": yn(r.parent_permission), "Parent phone": r.parent_phone || "",
         "Skills and interests": r.skills, Availability: r.availability, Message: r.message || "", Status: r.status }; } },
     partners: { title: "Partners", sub: "Organisations interested in partnering with CYA.", ph: "Search organisation, person, phone, email",
       cols: ["Received", "Organisation", "Contact person", "Contact", "Type", "Message", "Status", ""],
@@ -186,18 +188,22 @@
     var opts = '<select data-evf aria-label="Filter by event"><option value="">All events</option>' + evs.map(function (e) { return '<option value="' + e.id + '">' + esc(e.title) + "</option>"; }).join("") + "</select>";
     el.innerHTML = head("Reservations", "Seats booked through the website. Look up a ticket code at the door and mark people as checked in.") +
       '<form class="lookup" data-lookup><label class="srch">' + icon("ticket") + '<input name="code" placeholder="Ticket code, e.g. CYA-7KX2PQ" aria-label="Ticket code" autocapitalize="characters"></label><button class="btn bb sm" type="submit">Find ticket</button></form><div data-found></div>' +
-      '<div class="cards" data-totals></div>' + toolbar("reservations", { ph: "Search name, phone, code", extra: opts }) + '<div data-list="reservations"></div>';
+      '<div class="cards" data-totals></div>' + toolbar("reservations", { ph: "Search name, phone, parent phone, code", extra: opts }) + '<div data-list="reservations"></div>';
     exporters.reservations = { name: "cya-reservations", rows: function () { return resFiltered().map(function (x) { return { "Ticket code": x.ticket_code, Event: x.events ? x.events.title : "",
-      "Event date": evDate(x.events), Name: x.full_name, Phone: x.phone, Email: x.email || "", Seats: x.seats, "Checked in": x.checked_in ? "Yes" : "No", Booked: dt(x.created_at) }; }); } };
+      "Event date": evDate(x.events), Name: x.full_name, Phone: x.phone, Email: x.email || "",
+      "Under 18": yn(x.under_18), "Parent permission": yn(x.parent_permission), "Parent phone": x.parent_phone || "",
+      Seats: x.seats, "Checked in": x.checked_in ? "Yes" : "No", Booked: dt(x.created_at) }; }); } };
     drawReservations();
   }
   function resFiltered() {
     var el = $("#p-reservations"), q = $("[data-search]", el).value, ev = $("[data-evf]", el).value;
-    return cache.reservations.filter(function (x) { return (!ev || x.event_id === ev) && match(x, q, ["full_name", "phone", "email", "ticket_code"]); });
+    return cache.reservations.filter(function (x) { return (!ev || x.event_id === ev) && match(x, q, ["full_name", "phone", "email", "ticket_code", "parent_phone"]); });
   }
+  var RES_COLS = ["Code", "Event", "Name", "Contact", "Under 18", "Parent permission", "Parent phone", "Seats", "Check-in", ""];
   function resRow(x) {
     var wa = waLink(x);
-    return ['<b class="code">' + esc(x.ticket_code) + "</b>", esc(x.events && x.events.title), "<b>" + esc(x.full_name) + "</b>", esc(x.phone) + (x.email ? "<br>" + esc(x.email) : ""), x.seats,
+    return ['<b class="code">' + esc(x.ticket_code) + "</b>", esc(x.events && x.events.title), "<b>" + esc(x.full_name) + "</b>", esc(x.phone) + (x.email ? "<br>" + esc(x.email) : ""),
+      yn(x.under_18), yn(x.parent_permission), esc(x.parent_phone), x.seats,
       x.checked_in ? '<span class="pill ok">' + icon("check") + "Checked in</span>" + (x.checked_in_at ? '<br><small class="muted">' + dt(x.checked_in_at) + "</small>" : "") : '<span class="pill grey">Not yet</span>',
       '<div class="acts">' + '<button class="btn sm ' + (x.checked_in ? "bl" : "bb") + '" type="button" data-checkin="' + x.id + '">' + icon("check") + "<span>" + (x.checked_in ? "Undo" : "Check in") + "</span></button>" +
       (wa ? '<a class="btn bl sm" href="' + esc(wa) + '" target="_blank" rel="noopener">' + icon("chat") + "<span>WhatsApp reminder</span></a>" : "") + delBtn("reservations", x.id, x.ticket_code) + "</div>"];
@@ -207,7 +213,7 @@
     cache.reservations.forEach(function (x) { if (ev && x.event_id !== ev) return; var k = x.event_id; tot[k] = tot[k] || { e: x.events, seats: 0, n: 0, inn: 0 }; tot[k].seats += x.seats; tot[k].n++; if (x.checked_in) tot[k].inn += x.seats; });
     $("[data-totals]").innerHTML = Object.keys(tot).map(function (k) { var t = tot[k], c = t.e && t.e.capacity;
       return '<div class="stat"><span class="lbl">' + esc(t.e && t.e.title) + "</span><b>" + t.seats + (c ? " / " + c : "") + '</b><span>seats booked in ' + t.n + " booking" + (t.n === 1 ? "" : "s") + (c ? ", " + Math.max(c - t.seats, 0) + " left" : "") + ", " + t.inn + " checked in</span></div>"; }).join("");
-    $('[data-list="reservations"]').innerHTML = table(["Code", "Event", "Name", "Contact", "Seats", "Check-in", ""], rows, resRow);
+    $('[data-list="reservations"]').innerHTML = table(RES_COLS, rows, resRow);
   }
   async function checkIn(id) {
     var x = cache.reservations.find(function (r) { return r.id === id; }); if (!x) return;
@@ -220,7 +226,7 @@
   function lookupShow() {
     var box = $("[data-found]"); if (!box || !lastCode) return;
     var x = cache.reservations.find(function (r) { return r.ticket_code.toUpperCase() === lastCode; });
-    box.innerHTML = x ? '<div class="found">' + table(["Code", "Event", "Name", "Contact", "Seats", "Check-in", ""], [x], resRow) + "</div>" :
+    box.innerHTML = x ? '<div class="found">' + table(RES_COLS, [x], resRow) + "</div>" :
       '<div class="empty">No ticket found with code ' + esc(lastCode) + ". Please check the code and try again.</div>";
   }
 
