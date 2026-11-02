@@ -148,7 +148,23 @@ select { font: inherit; padding: 10px 12px; border: 1.5px solid #cfd8e8; border-
 .code { font-family: ui-monospace, Consolas, monospace; letter-spacing: 1px; color: var(--bd); }
 .pill.ok { background: #137a3a; display: inline-flex; gap: 4px; align-items: center; } .pill.ok .ic { width: 14px; height: 14px; }
 .pill.grey { background: #8a94a6; }
-.lookup { display: flex; gap: 10px; flex-wrap: wrap; margin: 14px 0 10px; grid-template-columns: none; } .lookup .srch { flex: 1 1 240px; }
+.scanbox { margin: 14px 0 6px; min-width: 0; max-width: 100%; }
+.scanbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.scanhelp { margin-top: 8px; max-width: 62ch; }
+.scanmsg { margin-top: 8px; max-width: 62ch; }
+.scanlive { margin-top: 10px; border-radius: 14px; overflow: hidden; background: #072a63; max-width: min(100%, 420px); }
+.scanlive video { display: block; width: 100%; max-height: 280px; object-fit: cover; background: #111; }
+.scanres { margin-top: 12px; background: #fff; border-radius: 14px; padding: 16px; box-shadow: 0 4px 14px #0b3c8c0f; max-width: min(100%, 520px); min-width: 0; border-left: 5px solid var(--b); }
+.scanres.ok { border-left-color: #137a3a; }
+.scanres.warn { border-left-color: var(--c); }
+.scanres.bad { border-left-color: var(--r); }
+.scanflag { font-weight: 800; margin-bottom: 6px; }
+.scanres h3 { color: var(--bd); font-size: 22px; line-height: 1.25; overflow-wrap: anywhere; }
+.scanres p { overflow-wrap: anywhere; }
+.scan-go { width: 100%; min-height: 52px; margin-top: 12px; font-size: 18px; }
+.filebtn { position: relative; overflow: hidden; }
+.filebtn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; font-size: 0; }
+.lookup { display: flex; gap: 10px; flex-wrap: wrap; margin: 14px 0 10px; grid-template-columns: none; } .lookup .srch { flex: 1 1 220px; min-width: 0; }
 .found { margin-bottom: 14px; border: 2px solid var(--c); border-radius: 16px; }
 .stars { display: inline-flex; gap: 1px; vertical-align: middle; } .star { width: 15px; height: 15px; color: #cfd8e8; } .star.on { color: var(--c); fill: var(--c); }
 form.up { max-width: none; margin: 18px 0; } form.up h2 { margin: 0; }
